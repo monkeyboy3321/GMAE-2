@@ -1,0 +1,863 @@
+!DOCTYPE html
+html lang=zh-TW
+head
+    meta charset=UTF-8
+    title火柴人街頭格鬥 - LF2 Style 修復硬直版title
+    script src=httpscdnjs.cloudflare.comajaxlibsp5.js1.4.2p5.min.jsscript
+    style
+        body { margin 0; padding 0; background #222; overflow hidden; display flex; justify-content center; align-items center; height 100vh; font-family 'Microsoft JhengHei', sans-serif; }
+        canvas { box-shadow 0 0 20px rgba(0,0,0,0.8); border-radius 4px; }
+    style
+head
+body
+
+script
+ ==========================================
+ 遊戲全域變數與設定
+ ==========================================
+let gameState = MENU; 
+let entities = [];
+let particles = [];
+let player;
+let cameraX = 0;
+let stageLimitX = 800; 
+let levelLength = 3000; 
+let groundY = 450; 
+
+const KEYS = {
+    UP 38, DOWN 40, LEFT 37, RIGHT 39,
+    ATTACK 90,  Z
+    JUMP 88,    X
+    DEFEND 67   C
+};
+
+const CHAR_TYPES = {
+    BALANCED { name 熱血鬥士, color '#e74c3c', hp 100, speed 4, power 10, scale 1 },
+    SPEED    { name 疾風刺客, color '#3498db', hp 80, speed 6, power 7, scale 0.9 },
+    POWER    { name 鋼鐵巨人, color '#2ecc71', hp 150, speed 2.5, power 18, scale 1.2 }
+};
+
+let selectedCharType = null;
+let waveTimer = 0;
+let enemyCount = 0;
+
+let prevKeys = {};
+
+ ==========================================
+ P5.js 標準函數
+ ==========================================
+function setup() {
+    createCanvas(800, 600);
+    textFont(Microsoft JhengHei);
+    frameRate(60);
+}
+
+function draw() {
+    background(50);
+    
+    if (gameState === MENU) drawMenu();
+    else if (gameState === SELECT) drawSelect();
+    else if (gameState === GAME) drawGame();
+    else if (gameState === GAMEOVER) drawGameOver();
+    else if (gameState === VICTORY) drawVictory();
+    
+    drawInputOverlay();
+    
+    prevKeys[KEYS.ATTACK] = keyIsDown(KEYS.ATTACK);
+    prevKeys[KEYS.JUMP] = keyIsDown(KEYS.JUMP);
+}
+
+function isKeyJustPressed(keyCode) {
+    return keyIsDown(keyCode) && !prevKeys[keyCode];
+}
+
+ ==========================================
+ 遊戲狀態繪製
+ ==========================================
+function drawMenu() {
+    background(30);
+    fill(255);
+    textAlign(CENTER);
+    textSize(48);
+    textStyle(BOLD);
+    text(火柴人街頭格鬥 - 硬直修復版, width2, height3);
+    
+    textSize(20);
+    textStyle(NORMAL);
+    text(操作說明, width2, height2 - 20);
+    fill('#3498db');
+    text(方向鍵 移動  Z 攻擊 (可連打三段)  X 跳躍 (可二段跳)  C 防禦, width2, height2 + 20);
+    text(★ 提示：在空中按 Z 可以施展飛踢！, width2, height2 + 50);
+    
+    fill('#f1c40f');
+    textSize(24);
+    if (frameCount % 60  30) text(- 按下 Z 鍵開始 -, width2, height2 + 120);
+    
+    if (isKeyJustPressed(KEYS.ATTACK)) {
+        gameState = SELECT;
+    }
+}
+
+function drawSelect() {
+    background(40);
+    textAlign(CENTER);
+    textSize(32);
+    fill(255);
+    text(選擇你的鬥士, width2, 80);
+    
+    let options = Object.keys(CHAR_TYPES);
+    let startX = 150;
+    
+    for(let i=0; ioptions.length; i++) {
+        let typeKey = options[i];
+        let data = CHAR_TYPES[typeKey];
+        let x = startX + i  250;
+        let y = height2;
+        
+        fill(data.color);
+        stroke(255);
+        strokeWeight(3);
+        if (keyIsDown(49 + i)) { 
+             initGame(typeKey);
+        }
+        
+        circle(x, y, 100);
+        
+        noStroke();
+        fill(255);
+        textSize(24);
+        text(data.name, x, y + 80);
+        textSize(16);
+        text(`HP ${data.hp}  攻 ${data.power}`, x, y + 105);
+        text(`速度 ${data.speed}`, x, y + 125);
+        
+        fill('#aaa');
+        text(`按鍵盤 [ ${i+1} ] 選擇`, x, y + 160);
+    }
+}
+
+function drawGame() {
+    push();
+    background(60);
+    fill(40);
+    rect(0, 450, width, 150);
+    
+    let targetCamX = player.pos.x - width  0.3;
+    targetCamX = constrain(targetCamX, 0, levelLength - width);
+    
+    if (enemyCount  0 && targetCamX  stageLimitX - width) {
+        targetCamX = stageLimitX - width;
+    } else if (enemyCount === 0 && player.pos.x  stageLimitX - 100) {
+        stageLimitX += 600; 
+        stageLimitX = min(stageLimitX, levelLength);
+        spawnEnemies(); 
+    }
+    
+    cameraX = lerp(cameraX, targetCamX, 0.1);
+    translate(-cameraX, 0);
+    
+    stroke(80);
+    strokeWeight(2);
+    for(let i=0; ilevelLength; i+=100) {
+        line(i, 450, i+50, 600);
+    }
+    
+    entities.sort((a, b) = a.pos.y - b.pos.y);
+    
+    for (let i = entities.length - 1; i = 0; i--) {
+        let e = entities[i];
+        e.update();
+        e.draw();
+        if (e.dead && e.deadTimer  60) {
+            entities.splice(i, 1);
+        }
+    }
+    
+    for (let i = particles.length - 1; i = 0; i--) {
+        particles[i].update();
+        particles[i].draw();
+        if (particles[i].life = 0) particles.splice(i, 1);
+    }
+    pop();
+    
+    drawGameUI();
+    
+    if (player.pos.x  levelLength - 100) gameState = VICTORY;
+    if (player.dead) gameState = GAMEOVER;
+}
+
+function drawGameOver() {
+    fill(0, 150);
+    rect(0,0,width,height);
+    fill('#c0392b');
+    textSize(64);
+    text(GAME OVER, width2, height2);
+    fill(255);
+    textSize(24);
+    text(按 F5 重新開始, width2, height2 + 60);
+}
+
+function drawVictory() {
+    fill(0, 150);
+    rect(0,0,width,height);
+    fill('#f1c40f');
+    textSize(64);
+    text(VICTORY!, width2, height2);
+    fill(255);
+    textSize(24);
+    text(你打敗了所有敵人, width2, height2 + 60);
+}
+
+function initGame(type) {
+    selectedCharType = CHAR_TYPES[type];
+    entities = [];
+    particles = [];
+    cameraX = 0;
+    stageLimitX = 800;
+    enemyCount = 0;
+    
+    player = new Fighter(200, 500, 0, selectedCharType);
+    player.isPlayer = true;
+    entities.push(player);
+    
+    spawnEnemies();
+    gameState = GAME;
+}
+
+function spawnEnemies() {
+    if (stageLimitX = levelLength) return;
+    
+    let count = floor(random(2, 4));
+    enemyCount = count;
+    
+    for(let i=0; icount; i++) {
+        let ex = cameraX + width + random(50, 300);
+        let ey = random(460, 580);
+        let type = random()  0.7  CHAR_TYPES.POWER  CHAR_TYPES.SPEED;
+        if (stageLimitX  2000) type = CHAR_TYPES.BALANCED;
+        
+        let enemy = new Fighter(ex, ey, 1, type);
+        enemy.ai = true;
+        entities.push(enemy);
+    }
+    createParticle(cameraX + width2, 200, TEXT, FIGHT!);
+}
+
+ ==========================================
+ 核心類別：鬥士 (Fighter)
+ ==========================================
+class Fighter {
+    constructor(x, y, team, type) {
+        this.pos = createVector(x, y);
+        this.vel = createVector(0, 0);
+        this.team = team; 
+        this.type = type;
+        
+        this.maxHp = type.hp;
+        this.hp = this.maxHp;
+        this.speed = type.speed;
+        this.power = type.power;
+        this.scale = type.scale;
+        
+        this.state = IDLE; 
+        this.facing = team === 0  1  -1;
+        this.frameTimer = 0;
+        
+        this.isGrounded = true;
+        this.zDepth = y; 
+        
+        this.jumpForce = -10;
+        this.jumpCount = 0;
+        this.maxJumps = 2; 
+        
+        this.queuedAttack = 0; 
+        this.hasHit = false;   
+        
+        this.ai = false;
+        this.target = null;
+        this.aiTimer = 0;
+        this.deadTimer = 0;
+    }
+    
+    update() {
+         --- 1. 處理死亡狀態 ---
+        if (this.state === DEAD) {
+            this.deadTimer++;
+            this.handlePhysics();
+            if (this.isGrounded) {
+                this.vel.x = 0.8;  屍體滑行減速
+                if (abs(this.vel.x)  0.1) this.vel.x = 0;
+            }
+            return;
+        }
+        
+        this.frameTimer++;
+        
+         --- 2. 處理物理 (重力、著地) ---
+        this.handlePhysics();
+        
+         --- 3. 狀態機嚴格分流 ---
+        if (this.state === HURT) {
+             受擊硬直狀態：專門處理減速與恢復，完全屏蔽輸入與攻擊
+            this.handleHurtLogic();
+        } else {
+             正常狀態：處理輸入或 AI，並推進攻擊邏輯
+            if (this.isPlayer) {
+                this.handleInput();
+            } else if (this.ai) {
+                this.handleAI();
+            }
+            this.handleAttackLogic();
+        }
+        
+         --- 4. 邊界限制 ---
+        this.pos.y = constrain(this.pos.y, 450, 590); 
+        if (this.pos.y  450 && this.isGrounded) this.pos.y = 450;
+        
+        let minX = cameraX;
+        let maxX = this.team === 0  stageLimitX  levelLength + 200;
+        this.pos.x = constrain(this.pos.x, minX, maxX);
+    }
+    
+    handlePhysics() {
+        if (!this.isGrounded) {
+            this.vel.y += 0.5;  重力
+        }
+        
+        this.pos.add(this.vel);
+        
+        if (!this.isGrounded) {
+            if (this.pos.y = this.zDepth && this.vel.y  0) {
+                 著地判定
+                this.pos.y = this.zDepth;
+                this.vel.y = 0;
+                this.isGrounded = true;
+                this.jumpCount = 0;
+                
+                if (this.state === DEAD) return;
+                
+                 落地時若不在受擊硬直中，解除狀態回歸待機
+                if (this.state !== HURT) {
+                    this.vel.x = 0;
+                    this.setState(IDLE);
+                }
+            }
+        }
+    }
+
+    handleHurtLogic() {
+         在地面時給予摩擦力減速，防止永遠滑行
+        if (this.isGrounded) {
+            this.vel.x = 0.8;
+            if (abs(this.vel.x)  0.1) this.vel.x = 0;
+        }
+        
+         硬直時間判定 (被擊中後僵直的幀數)
+        let hitStunDuration = 25; 
+        if (this.frameTimer = hitStunDuration) {
+            this.vel.x = 0;
+            this.setState(this.isGrounded  IDLE  JUMP);
+        }
+    }
+    
+    setState(newState) {
+        if (this.state === DEAD) return;
+        if (this.state === newState) return;
+        this.state = newState;
+        this.frameTimer = 0;
+        this.hasHit = false; 
+    }
+    
+    handleInput() {
+        let attackJustPressed = isKeyJustPressed(KEYS.ATTACK);
+        let jumpJustPressed = isKeyJustPressed(KEYS.JUMP);
+        
+         --- 攻擊處理 ---
+        if (attackJustPressed) {
+            if (this.isGrounded) {
+                if (this.state === IDLE  this.state === WALK  this.state === DEFEND) {
+                    this.startAttack(1);
+                } else if (this.state === ATTACK1 && this.frameTimer  5) {
+                    this.queuedAttack = 2; 
+                } else if (this.state === ATTACK2 && this.frameTimer  5) {
+                    this.queuedAttack = 3; 
+                }
+            } else {
+                if (this.state !== JUMP_ATTACK) {
+                    this.startAttack(JUMP);
+                }
+            }
+        }
+        
+         --- 跳躍處理 ---
+        if (jumpJustPressed && !this.state.startsWith(ATTACK)) {
+            if (this.isGrounded  this.jumpCount  this.maxJumps) {
+                this.jump();
+            }
+        }
+        
+         --- 防禦與移動 ---
+        if (!this.state.startsWith(ATTACK)) {
+            if (keyIsDown(KEYS.DEFEND) && this.isGrounded) {
+                this.setState(DEFEND);
+                this.vel.mult(0);
+                return;
+            }
+            
+            let moving = false;
+            let dx = 0;
+            let dy = 0;
+            
+            if (keyIsDown(KEYS.LEFT)) { dx = -1; this.facing = -1; moving = true; }
+            if (keyIsDown(KEYS.RIGHT)) { dx = 1; this.facing = 1; moving = true; }
+            if (keyIsDown(KEYS.UP)) { dy = -1; moving = true; }
+            if (keyIsDown(KEYS.DOWN)) { dy = 1; moving = true; }
+            
+            if (moving && this.isGrounded) {
+                this.setState(WALK);
+                this.vel.x = dx  this.speed;
+                this.zDepth += dy  (this.speed  0.7);
+                this.zDepth = constrain(this.zDepth, 450, 590);
+                this.pos.y = this.zDepth; 
+            } else if (this.isGrounded) {
+                this.setState(IDLE);
+                this.vel.x = 0;
+                this.vel.y = 0;
+            } else if (!this.isGrounded) {
+                this.vel.x = dx  (this.speed  0.8);
+            }
+        }
+    }
+
+    startAttack(comboLevel) {
+        if (comboLevel === JUMP) {
+            this.setState(JUMP_ATTACK);
+        } else {
+            this.setState(ATTACK + comboLevel);
+            this.vel.x = this.facing  1.5; 
+        }
+        this.queuedAttack = 0; 
+    }
+
+    handleAttackLogic() {
+        if (!this.state.startsWith(ATTACK) && this.state !== JUMP_ATTACK) return;
+
+        let isKick = (this.state === ATTACK3  this.state === JUMP_ATTACK);
+        let animLength = isKick  25  15; 
+        let hitFrame = isKick  10  6;    
+
+        if (this.frameTimer === hitFrame && !this.hasHit) {
+            this.checkHitBox(isKick);
+            this.hasHit = true;
+        }
+
+        if (this.frameTimer = animLength) {
+            if (this.state === ATTACK1 && this.queuedAttack === 2) {
+                this.startAttack(2);
+            } else if (this.state === ATTACK2 && this.queuedAttack === 3) {
+                this.startAttack(3);
+            } else {
+                this.setState(this.isGrounded  IDLE  JUMP);
+            }
+        }
+    }
+
+    checkHitBox(isKick) {
+        let reach = isKick  90  60; 
+        let hitRangeY = 40;
+        let damageMultiplier = this.state === ATTACK3  1.5  1; 
+
+        for(let e of entities) {
+            if (e === this  e.team === this.team  e.state === DEAD) continue;
+            
+            let dx = (e.pos.x - this.pos.x)  this.facing;
+            let dy = abs(e.pos.y - this.pos.y);
+            
+            if (dx  0 && dx  reach && dy  hitRangeY) {
+                let damage = (this.power  damageMultiplier) + random(-2, 2);
+                let knockback = isKick  8  4; 
+                e.takeDamage(damage, this.facing, knockback);
+                
+                let fxX = (this.pos.x + e.pos.x)2;
+                let fxY = (this.pos.y + e.pos.y)2 - 40;
+                createParticle(fxX, fxY, HIT);
+            }
+        }
+    }
+    
+    jump() {
+        this.setState(JUMP);
+        this.isGrounded = false;
+        this.vel.y = this.jumpForce;
+        this.jumpCount++;
+        if (this.pos.y === this.zDepth) {
+            this.pos.y -= 1; 
+        }
+        createParticle(this.pos.x, this.zDepth, DUST);
+    }
+    
+    takeDamage(amount, hitterFacing, knockbackForce) {
+        if (this.state === DEFEND) {
+            amount = 0.2; 
+            createParticle(this.pos.x, this.pos.y - 50, BLOCK);
+            this.vel.x = hitterFacing  1;  防禦時微退
+        } else {
+            this.setState(HURT);
+            this.vel.x = hitterFacing  knockbackForce;  被擊退，套用硬直
+        }
+        
+        this.hp -= amount;
+        createParticle(this.pos.x, this.pos.y - 80, TEXT, Math.round(amount));
+        
+        if (this.hp = 0) {
+            this.hp = 0;
+            this.die();
+        }
+    }
+    
+    die() {
+        this.setState(DEAD);
+        this.vel.y = -5;  死亡擊飛效果
+        this.isGrounded = false;
+        if (this.team === 1) enemyCount--;
+    }
+
+    handleAI() {
+        this.aiTimer++;
+        if (!this.target  this.target.state === DEAD) {
+            let minDist = 9999;
+            for(let e of entities) {
+                if (e.team !== this.team && e.state !== DEAD) {
+                    let d = dist(this.pos.x, this.pos.y, e.pos.x, e.pos.y);
+                    if (d  minDist) {
+                        minDist = d;
+                        this.target = e;
+                    }
+                }
+            }
+        }
+        
+        if (this.target) {
+            let dx = this.target.pos.x - this.pos.x;
+            let dy = this.target.zDepth - this.zDepth;
+            let distance = abs(dx);
+            let zDistance = abs(dy);
+            
+            this.facing = dx  0  1  -1;
+            
+            if (distance  60 && zDistance  20) {
+                if (this.aiTimer % 50 === 0) {
+                    this.startAttack(1); 
+                } else {
+                    this.setState(IDLE);
+                    this.vel.x = 0;
+                }
+            } else {
+                this.setState(WALK);
+                this.vel.x = (dx  0  1  -1)  (this.speed  0.5);
+                if (zDistance  5) {
+                    this.zDepth += (dy  0  1  -1)  (this.speed  0.3);
+                    this.pos.y = this.zDepth;
+                }
+            }
+        }
+    }
+
+     ==================================
+     繪圖與動畫計算
+     ==================================
+    draw() {
+        push();
+        translate(this.pos.x, this.pos.y);
+        scale(this.facing  this.scale, this.scale); 
+        
+        if (this.isGrounded  this.pos.y  this.zDepth) {
+            noStroke();
+            fill(0, 50);
+            ellipse(0, this.zDepth - this.pos.y, 40, 10); 
+        }
+        
+        let headSize = 20;
+        let bodyLen = 45;
+        let limbLen = 30;
+        
+        stroke(this.type.color);
+        strokeWeight(4);
+        noFill();
+        
+        let anim = this.getAnimData();
+        
+        this.drawLimb(0, bodyLen, anim.lLeg, limbLen); 
+        this.drawLimb(0, bodyLen, anim.rLeg, limbLen); 
+        
+        strokeWeight(5);
+        line(0, 0, anim.bodyX, bodyLen); 
+        
+        fill(255);
+        noStroke();
+        circle(anim.bodyX, -headSize2, headSize); 
+        
+        stroke(this.type.color);
+        strokeWeight(4);
+        noFill();
+        this.drawLimb(anim.bodyX, 10, anim.lArm, limbLen); 
+        this.drawLimb(anim.bodyX, 10, anim.rArm, limbLen); 
+        
+        pop();
+        this.drawHealthBar();
+    }
+    
+    drawLimb(ox, oy, angles, len) {
+        push();
+        translate(ox, oy);
+        rotate(radians(angles[0]));
+        line(0, 0, 0, len); 
+        translate(0, len);
+        rotate(radians(angles[1]));
+        line(0, 0, 0, len); 
+        pop();
+    }
+    
+    drawHealthBar() {
+        if (this.state === DEAD) return;
+        push();
+        translate(this.pos.x, this.pos.y - 110);
+        noStroke();
+        fill(0);
+        rect(-20, 0, 40, 5);
+        fill(this.team === 0  '#2ecc71'  '#e74c3c');
+        let hpPct = this.hp  this.maxHp;
+        rect(-20, 0, 40  hpPct, 5);
+        if (this.isPlayer) {
+            fill('#f1c40f');
+            triangle(0, -10, -5, -20, 5, -20);
+        }
+        pop();
+    }
+    
+    getAnimData() {
+        let t = this.frameTimer;
+        let pose = {
+            bodyX 0,
+            lLeg [10, 10], rLeg [-10, 5],
+            lArm [20, -40], rArm [-20, -20]
+        };
+        
+        if (this.state === IDLE) {
+            let breath = sin(frameCount  0.1)  2;
+            pose.lArm = [20 + breath, -40];
+            pose.rArm = [-20 - breath, -20];
+        }
+        else if (this.state === WALK) {
+            let swing = sin(t  0.5)  30;
+            pose.bodyX = 5;
+            pose.lLeg = [swing, 10];
+            pose.rLeg = [-swing, 10];
+            pose.lArm = [-swing, -30];
+            pose.rArm = [swing, -30];
+        }
+        else if (this.state === ATTACK1) {
+            if (t  5) { pose.rArm = [-40, -90]; pose.bodyX = -5; } 
+            else if (t  10) { pose.rArm = [-90, 0]; pose.bodyX = 10; pose.lArm = [30, -90];} 
+            else { pose.rArm = [-20, -20]; }
+        }
+        else if (this.state === ATTACK2) {
+            if (t  5) { pose.lArm = [-40, -90]; pose.bodyX = -10; } 
+            else if (t  10) { pose.lArm = [-90, 0]; pose.rArm = [40, -90]; pose.bodyX = 15; pose.rLeg=[-20, 0]; } 
+            else { pose.lArm = [20, -40]; }
+        }
+        else if (this.state === ATTACK3) {
+            if (t  8) { pose.bodyX = -15; pose.rLeg = [20, 90]; } 
+            else if (t  18) { pose.rLeg = [-90, 0]; pose.bodyX = 10; pose.lLeg=[10,0]; } 
+            else { pose.rLeg = [-10, 5]; }
+        }
+        else if (this.state === JUMP) {
+            pose.lLeg = [-30, 90];
+            pose.rLeg = [10, 90];
+            pose.lArm = [-140, 0];
+            pose.rArm = [140, 0];
+        }
+        else if (this.state === JUMP_ATTACK) {
+            pose.bodyX = 20; 
+            pose.rLeg = [-80, 0]; 
+            pose.lLeg = [40, 90]; 
+            pose.lArm = [-120, -40];
+            pose.rArm = [40, -40];
+        }
+        else if (this.state === HURT) {
+            pose.bodyX = -15;
+            pose.lArm = [-150, -20];
+            pose.rArm = [-130, -10];
+            pose.lLeg = [-10, 10];
+            pose.rLeg = [20, 10];
+        }
+        else if (this.state === DEFEND) {
+            pose.lArm = [-40, -120]; 
+            pose.rArm = [-60, -100];
+            pose.bodyX = -5;
+        }
+        else if (this.state === DEAD) {
+            pose.bodyX = -30;
+            pose.lLeg = [80, 10];
+            pose.rLeg = [70, 10];
+            pose.lArm = [160, 10];
+            pose.rArm = [170, 10];
+        }
+        return pose;
+    }
+}
+
+ ==========================================
+ 粒子特效系統
+ ==========================================
+class Particle {
+    constructor(x, y, type, msg) {
+        this.pos = createVector(x, y);
+        this.type = type; 
+        this.life = 30;
+        this.msg = msg;
+        
+        if (type === HIT) {
+            this.vel = p5.Vector.random2D().mult(random(2, 6));
+            this.color = color(255, random(150, 255), 50);
+            this.size = random(8, 16);
+        } else if (type === BLOCK) {
+             this.vel = createVector(0,0);
+             this.color = color(100, 100, 255);
+        } else if (type === TEXT) {
+            this.vel = createVector(0, -2);
+            this.life = 60;
+        } else if (type === DUST) {
+            this.vel = createVector(random(-1,1), random(-0.5, 0));
+            this.color = color(200, 150);
+            this.size = random(10, 20);
+        }
+    }
+    
+    update() {
+        this.pos.add(this.vel);
+        this.life--;
+        if (this.type === HIT  this.type === DUST) this.size = 0.9;
+    }
+    
+    draw() {
+        if (this.type === HIT  this.type === DUST) {
+            noStroke();
+            fill(this.color);
+            ellipse(this.pos.x, this.pos.y, this.size);
+        } else if (this.type === BLOCK) {
+            noFill();
+            stroke(this.color);
+            strokeWeight(3);
+            circle(this.pos.x, this.pos.y, 50 - this.life);
+        } else if (this.type === TEXT) {
+            fill(255);
+            noStroke();
+            textAlign(CENTER);
+            textSize(20);
+            text(this.msg, this.pos.x, this.pos.y);
+        }
+    }
+}
+
+function createParticle(x, y, type, msg) {
+    if (type === HIT) {
+        for(let i=0; i6; i++) particles.push(new Particle(x, y, type));
+    } else if (type === DUST) {
+        for(let i=0; i4; i++) particles.push(new Particle(x, y, type));
+    } else {
+        particles.push(new Particle(x, y, type, msg));
+    }
+}
+
+ ==========================================
+ UI 顯示與工具
+ ==========================================
+function drawGameUI() {
+    if (!player) return;
+    
+    push();
+    translate(20, 20);
+    
+    stroke(255);
+    strokeWeight(2);
+    fill(0, 100);
+    rect(0, 0, 300, 80, 10);
+    
+    fill(player.type.color);
+    circle(40, 40, 50);
+    
+    fill(255);
+    noStroke();
+    textSize(20);
+    textAlign(LEFT);
+    text(player.type.name, 80, 30);
+    
+    stroke(255);
+    strokeWeight(1);
+    noFill();
+    rect(80, 40, 200, 15);
+    
+    noStroke();
+    fill('#e74c3c');
+    let hpW = map(player.hp, 0, player.maxHp, 0, 200);
+    rect(80, 41, max(0, hpW), 13);
+    
+    fill('#f1c40f');
+    textSize(16);
+    textAlign(RIGHT);
+    text(`剩餘敵人 ${enemyCount}`, width - 30, 40);
+    text(`關卡進度 ${Math.floor(player.pos.x)}${levelLength}`, width - 30, 65);
+    
+    pop();
+}
+
+function drawInputOverlay() {
+    let baseX = width2 - 100;
+    let baseY = height - 60;
+    let size = 40;
+    
+    drawKey(baseX, baseY - size, ↑, KEYS.UP);
+    drawKey(baseX, baseY, ↓, KEYS.DOWN);
+    drawKey(baseX - size, baseY, ←, KEYS.LEFT);
+    drawKey(baseX + size, baseY, →, KEYS.RIGHT);
+    
+    drawKey(baseX + 80, baseY, Z, KEYS.ATTACK, 攻);
+    drawKey(baseX + 130, baseY, X, KEYS.JUMP, 跳);
+    drawKey(baseX + 180, baseY, C, KEYS.DEFEND, 防);
+}
+
+function drawKey(x, y, label, code, subLabel) {
+    let isPressed = keyIsDown(code);
+    
+    push();
+    stroke(255);
+    strokeWeight(2);
+    if (isPressed) {
+        fill('#f1c40f');
+        drawingContext.shadowBlur = 15;
+        drawingContext.shadowColor = '#f1c40f';
+    } else {
+        fill(0, 150);
+        drawingContext.shadowBlur = 0;
+    }
+    
+    rectMode(CENTER);
+    rect(x, y, 35, 35, 5);
+    
+    fill(isPressed  0  255);
+    noStroke();
+    textAlign(CENTER, CENTER);
+    textSize(16);
+    text(label, x, y);
+    
+    if (subLabel) {
+        textSize(10);
+        fill(200);
+        text(subLabel, x, y - 25);
+    }
+    pop();
+}
+script
+body
+html
